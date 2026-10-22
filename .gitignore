@@ -3,3 +3,9 @@
 .vs/
 *.user
 *.suo
+*.log
+*.tmp
+*.temp
+.env
+.env.*
+artifacts/
