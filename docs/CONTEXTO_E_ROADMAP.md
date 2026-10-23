@@ -262,3 +262,18 @@ O aplicativo atual não inspeciona nem limpa perfis do Chrome. Chrome possui vá
 ## 12. Gate de aprovação
 
 A Fase 1 está implementada: Central de Manutenção, catálogo, análise somente leitura da TEMP do usuário, cancelamento, histórico com limites e testes. Nenhuma operação de limpeza real foi adicionada ou executada. A próxima etapa proposta é a Fase 2 definida pelo usuário, após revisão desta entrega. Até aprovação explícita, não implementar outras funcionalidades, instalar dependências, excluir arquivos reais, modificar dados do Chrome ou mudar políticas do Windows.
+
+## 13. Distribuição Windows — preparação para homologação
+
+- Versão da aplicação/instalador: `1.0.0`, definida em `src/KeepAwake.Windows/KeepAwake.Windows.csproj` e usada pelo compilador Inno Setup.
+- Tecnologia: Inno Setup 6, já instalado por usuário no ambiente em que este pacote foi criado; o instalador não exige privilégios administrativos e usa o caminho `%LOCALAPPDATA%\Programs\WindowsKeepAwake`.
+- `Build-Installer.ps1` executa restore, build Release em `artifacts/build/<versão>`, runner automatizado, publicação self-contained `win-x64` e compilação ISCC. A publicação preserva os nomes de apphost, DLL e runtimeconfig; não usa trimming nem single-file. Os outputs estão sob `artifacts/` e não devem ser adicionados ao Git.
+- O AppId é estável entre versões. O instalador cria o atalho do menu Iniciar e oferece, desmarcados por padrão, o atalho da área de trabalho e a inicialização única após instalar. Não habilita inicialização automática com o Windows.
+- O instalador não fecha o processo. O mutex da aplicação é verificado antes da instalação; feche pelo menu **Sair** antes de atualizar ou desinstalar.
+- Quando existe uma preferência de inicialização automática previamente ativada pelo usuário, a instalação atualiza o caminho para o executável instalado. A desinstalação remove essa referência somente se ela corresponder ao executável removido. Logs e histórico em `%LOCALAPPDATA%\WindowsKeepAwake` permanecem no disco; remoção manual é opcional.
+- O executável e o instalador não têm assinatura Authenticode nesta entrega. O Windows pode mostrar aviso de editor desconhecido.
+- O Inno Setup 6.7.3 anunciou que usuários comerciais devem adquirir uma licença. A licença aplicável ao uso/distribuição empresarial não foi confirmada nesta tarefa; consulte a organização e a [página oficial de licenças comerciais](https://jrsoftware.org/isorder.php) antes de distribuir amplamente.
+- Validação executada nesta revisão: `dotnet restore WindowsKeepAwake.sln` e restore da publicação `win-x64` concluíram; build Release terminou com 0 avisos e 0 erros; o runner STA terminou com `69/69 checks passed`; publicação self-contained e compilação do instalador Inno Setup 6.7.3 concluíram com sucesso; `git diff --check` passou.
+- A publicação contém 464 arquivos de runtime/aplicação, incluindo apphost, DLL, `.deps.json`, `.runtimeconfig.json` e runtime nativo .NET; não contém testes, PDB, fontes, logs ou temporários. O instalador final tem 51.099.954 bytes (48,73 MiB), versão de produto 1.0.0 e SHA-256 `80FD8CC7134A45BBC0E577879DFA99B40C972E9231A9F903E4C35D48CC970601`.
+- Build, testes e inspeção do pacote não validam a execução do instalador, a criação real dos atalhos, entrada em Aplicativos Instalados, atualização ou desinstalação. A máquina não tem uma VM/conta Windows isolada preparada para teste; não executar o instalador sobre a instalação pessoal nesta etapa.
+- Gate: disponibilizar o instalador para homologação manual; **não criar commit** até o usuário confirmar aprovação. Não realizar push, merge ou alteração de branch principal.
