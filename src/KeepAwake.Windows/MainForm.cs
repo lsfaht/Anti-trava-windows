@@ -5,7 +5,7 @@ using KeepAwake.Core;
 
 namespace KeepAwake.Windows;
 
-internal sealed class MainForm : Form
+internal sealed partial class MainForm : Form
 {
     private readonly PowerRequest _request;
     private PresentationModeRequest? _presentationRequest;
@@ -23,6 +23,30 @@ internal sealed class MainForm : Form
     private readonly ListView _windows = new() { View = View.Details, FullRowSelect = true, Dock = DockStyle.Fill };
     private readonly TextBox _report = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 3000 };
+    private readonly Panel _pageHost = new() { Dock = DockStyle.Fill };
+    private readonly Label _pageTitle = new() { AutoSize = true };
+    private readonly Label _pageDescription = new() { AutoSize = true };
+    private readonly Label _brandTitle = new() { AutoSize = true };
+    private readonly Label _brandDescription = new() { AutoSize = true };
+    private readonly PowerStatusIndicator _powerIndicator = new();
+    private readonly Dictionary<string, Panel> _pages = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Button> _navigationButtons = new(StringComparer.Ordinal);
+    private TableLayoutPanel? _shellLayout;
+    private TableLayoutPanel? _sidebarLayout;
+    private ToolTip? _navigationToolTip;
+    private readonly Font _navigationFullFont = new("Segoe UI", 9.5F, FontStyle.Regular);
+    private readonly Font _navigationFullSelectedFont = new("Segoe UI Semibold", 9.5F, FontStyle.Regular);
+    private readonly Font _navigationCompactFont = new("Segoe UI", 13F, FontStyle.Regular);
+    private readonly Font _navigationCompactSelectedFont = new("Segoe UI Semibold", 13F, FontStyle.Regular);
+    private bool _responsiveShellInitialized;
+    private bool _navigationCompact;
+    private readonly Label _dashboardAwakeState = new() { AutoSize = true };
+    private readonly Label _dashboardPresentationState = new() { AutoSize = true };
+    private readonly Label _dashboardDisplayState = new() { AutoSize = true };
+    private readonly Label _dashboardDuration = new() { AutoSize = true };
+    private readonly Label _dashboardStartup = new() { AutoSize = true };
+    private readonly Label _diagnosticState = new() { AutoSize = true, Text = "Relatório ainda não atualizado." };
+    private string _currentPage = "Início";
     private readonly string _logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WindowsKeepAwake", "diagnostics.log");
     private readonly ContextMenuStrip _trayMenu = new();
     private readonly ToolStripMenuItem _trayOpen = new("Abrir janela");
@@ -32,51 +56,62 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _trayExit = new("Sair");
     private readonly Icon _trayIconImage;
     private readonly NotifyIcon _trayIcon;
+    private readonly MaintenanceCenterControl _maintenanceCenter;
     private bool _allowExit;
     private bool _trayDisposed;
     private bool _explicitlyStopped;
     private readonly bool _autoActivatePresentation;
     private DateTimeOffset? _expiresAt;
     private readonly System.Windows.Forms.Timer _expiryTimer = new() { Interval = 1000 };
+    private readonly System.Windows.Forms.Timer _powerStatusTimer = new() { Interval = 15000 };
+    private readonly Func<PowerSupplySnapshot> _powerStatusProvider;
+    private string? _lastPowerStatusError;
 
     public MainForm() : this(null, null, null, null, true) { }
 
-    internal MainForm(PowerRequest? request, Action<string>? logSink, Action<string>? errorPresenter, PresentationModeRequest? presentationRequest = null, bool autoActivatePresentation = false)
+    internal MainForm(PowerRequest? request, Action<string>? logSink, Action<string>? errorPresenter, PresentationModeRequest? presentationRequest = null, bool autoActivatePresentation = false, IUserTempAnalysisService? maintenanceAnalysisService = null, IMaintenanceHistoryStore? maintenanceHistoryStore = null, Func<PowerSupplySnapshot>? powerStatusProvider = null)
     {
         _request = request ?? new PowerRequest(new WindowsExecutionStateApi());
         _presentationRequest = presentationRequest;
         _autoActivatePresentation = autoActivatePresentation;
         _logSink = logSink;
         _errorPresenter = errorPresenter;
-        Text = "Windows Keep Awake — diagnóstico";
-        Width = 820; Height = 640; MinimumSize = new Size(700, 500);
-        _windows.Columns.Add("Processo", 170); _windows.Columns.Add("Título da janela (somente em memória)", 450); _windows.Columns.Add("Estado", 90);
+        _powerStatusProvider = powerStatusProvider ?? WindowsPowerStatusReader.Read;
+        var appDataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WindowsKeepAwake");
+        _maintenanceCenter = new MaintenanceCenterControl(
+            maintenanceAnalysisService ?? new WindowsUserTempAnalysisService(),
+            maintenanceHistoryStore ?? new JsonMaintenanceHistoryStore(Path.Combine(appDataDirectory, "maintenance-history.json")));
+        Text = "Windows Keep Awake";
+        AutoScaleMode = AutoScaleMode.Font;
+        StartPosition = FormStartPosition.CenterScreen;
+        var workArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1366, 768);
+        ClientSize = new Size(Math.Min(1320, Math.Max(820, workArea.Width - 64)), Math.Min(820, Math.Max(540, workArea.Height - 80)));
+        MinimumSize = new Size(800, 480);
+        BackColor = AppTheme.Background;
+        ForeColor = AppTheme.Text;
+        Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+        BuildApplicationShell();
+        _windows.Columns.Add("Processo", 170); _windows.Columns.Add("Título da janela", 450); _windows.Columns.Add("Estado", 90);
+        _windows.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+        _windows.Resize += (_, _) => ResizeWindowColumns();
+        ResizeWindowColumns();
         _toggle.Click += (_, _) => ToggleRequest();
         _presentationToggle.Click += (_, _) => TogglePresentationRequest();
         _timer.Tick += (_, _) => RefreshStatus();
+        _powerStatusTimer.Tick += (_, _) => RefreshPowerStatus();
+        _filters.TextChanged += (_, _) => RefreshStatus();
         _duration.Items.AddRange(["30 minutos", "1 hora", "2 horas", "Indefinidamente"]);
         _duration.SelectedIndex = 3;
-        _duration.SelectedIndexChanged += (_, _) => { if (_request.IsEnabled || _presentationRequest?.IsEnabled == true) StartExpiry(); };
+        _duration.SelectedIndexChanged += (_, _) =>
+        {
+            if (_request.IsEnabled || _presentationRequest?.IsEnabled == true) StartExpiry();
+            UpdateDashboard();
+        };
         _startup.Checked = StartupRegistration.IsEnabled;
         _startup.CheckedChanged += HandleStartupChanged;
+        _display.CheckedChanged += (_, _) => UpdateDashboard();
         _expiryTimer.Tick += (_, _) => CheckExpiration();
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 174, Padding = new Padding(10), AutoSize = false, WrapContents = true };
-        top.Controls.AddRange([_toggle, _status, _display, new Label { Text = "Filtro opcional (; separa itens):", AutoSize = true, Padding = new Padding(5) }, _filters,
-            _presentationToggle, _presentationStatus, new Label { Text = "Duração:", AutoSize = true }, _duration, _startup,
-            new Label { Text = "Este modo também suprime o protetor de tela e o bloqueio automático por inatividade enquanto ativo. Use somente se autorizado pela organização.", AutoSize = false, Width = 770, Height = 34 }]);
-        var tabs = new TabControl { Dock = DockStyle.Fill };
-        var activity = new TabPage("Janelas e sessão");
-        var activityLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
-        activityLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); activityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); activityLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-        activityLayout.Controls.Add(_session, 0, 0); activityLayout.Controls.Add(_windows, 0, 1);
-        activityLayout.Controls.Add(new Label { Text = "A manutenção de energia não impede protetor de tela ou bloqueio por política.", AutoSize = true, Padding = new Padding(4) }, 0, 2);
-        activity.Controls.Add(activityLayout);
-        var diagnostics = new TabPage("Diagnóstico");
-        var diagnose = new Button { Text = "Atualizar relatório", Dock = DockStyle.Top, Height = 34 };
-        diagnose.Click += (_, _) => _report.Text = BuildReport();
-        diagnostics.Controls.Add(_report); diagnostics.Controls.Add(diagnose);
-        tabs.TabPages.Add(activity); tabs.TabPages.Add(diagnostics);
-        Controls.Add(tabs); Controls.Add(top);
+        _diagnosticState.Text = "Relatório atualizado automaticamente ao abrir.";
         _trayMenu.Items.AddRange([_trayOpen, new ToolStripSeparator(), _trayStart, _trayStop, _trayPresentation, new ToolStripSeparator(), _trayExit]);
         _trayOpen.Click += (_, _) => RestoreWindow();
         _trayStart.Click += (_, _) => ToggleRequest();
@@ -88,7 +123,7 @@ internal sealed class MainForm : Form
         _trayIcon.DoubleClick += (_, _) => HandleTrayDoubleClick();
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) HideToTray(); };
         FormClosing += HandleFormClosing;
-        Shown += (_, _) => { _timer.Start(); _expiryTimer.Start(); RefreshStatus(); _report.Text = BuildReport(); if (_autoActivatePresentation && !_explicitlyStopped && _presentationRequest?.IsEnabled != true) TogglePresentationRequest(); };
+        Shown += (_, _) => { _timer.Start(); _expiryTimer.Start(); _powerStatusTimer.Start(); RefreshPowerStatus(); RefreshStatus(); _report.Text = BuildReport(); if (_autoActivatePresentation && !_explicitlyStopped && _presentationRequest?.IsEnabled != true) TogglePresentationRequest(); };
         SyncTrayMenu();
     }
 
@@ -106,6 +141,17 @@ internal sealed class MainForm : Form
     internal ToolStripMenuItem TrayPresentationItem => _trayPresentation;
     internal ToolStripMenuItem TrayExitItem => _trayExit;
     internal bool TrayDisposed => _trayDisposed;
+    internal MaintenanceCenterControl MaintenanceCenter => _maintenanceCenter;
+    internal string CurrentPage => _currentPage;
+    internal IReadOnlyList<string> NavigationPages => _pages.Keys.ToArray();
+    internal Button GetNavigationButton(string page) => _navigationButtons[page];
+    internal int SidebarWidth => _shellLayout is null ? 0 : (int)_shellLayout.ColumnStyles[0].Width;
+    internal Control GetPageControl(string page) => _pages[page];
+    internal Label DashboardAwakeState => _dashboardAwakeState;
+    internal Label DashboardPresentationState => _dashboardPresentationState;
+    internal Label DashboardDisplayState => _dashboardDisplayState;
+    internal Label DashboardDuration => _dashboardDuration;
+    internal PowerStatusIndicator PowerIndicator => _powerIndicator;
     internal ComboBox DurationSelector => _duration;
     internal CheckBox KeepDisplayOption => _display;
     internal CheckBox StartupOption => _startup;
@@ -119,10 +165,32 @@ internal sealed class MainForm : Form
     {
         if (IsDisposed) return;
         ShowInTaskbar = true;
-        Show();
+        if (!Visible) Show();
         WindowState = FormWindowState.Normal;
+        EnsureWindowIsOnScreen();
         Activate();
         BringToFront();
+    }
+
+    private void EnsureWindowIsOnScreen()
+    {
+        var bounds = Bounds;
+        var hasVisibleArea = Screen.AllScreens.Any(screen =>
+        {
+            var intersection = Rectangle.Intersect(bounds, screen.WorkingArea);
+            return intersection.Width >= Math.Min(100, bounds.Width)
+                && intersection.Height >= Math.Min(80, bounds.Height);
+        });
+        if (hasVisibleArea) return;
+
+        var workArea = Screen.PrimaryScreen?.WorkingArea ?? SystemInformation.WorkingArea;
+        var width = Math.Min(Math.Max(Width, MinimumSize.Width), workArea.Width);
+        var height = Math.Min(Math.Max(Height, MinimumSize.Height), workArea.Height);
+        Bounds = new Rectangle(
+            workArea.Left + Math.Max(0, (workArea.Width - width) / 2),
+            workArea.Top + Math.Max(0, (workArea.Height - height) / 2),
+            width,
+            height);
     }
 
     internal void HandleTrayDoubleClick() => RestoreWindow();
@@ -208,6 +276,7 @@ internal sealed class MainForm : Form
         _trayStop.Enabled = requestActive;
         _trayPresentation.Text = presentationActive ? "Desativar modo de apresentação" : "Ativar modo de apresentação";
         _trayIcon.Text = "Windows Keep Awake — " + (requestActive || presentationActive ? "Ativo" : "Inativo");
+        UpdateDashboard();
     }
 
     private void StartExpiry()
@@ -277,11 +346,44 @@ internal sealed class MainForm : Form
 
         _timer.Stop();
         _expiryTimer.Stop();
+        _powerStatusTimer.Stop();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _trayIconImage.Dispose();
         _trayMenu.Dispose();
+        _navigationToolTip?.Dispose();
+        _navigationFullFont.Dispose();
+        _navigationFullSelectedFont.Dispose();
+        _navigationCompactFont.Dispose();
+        _navigationCompactSelectedFont.Dispose();
         _trayDisposed = true;
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int wmPowerBroadcast = 0x0218;
+        const int pbtApmPowerStatusChange = 0x000A;
+        if (m.Msg == wmPowerBroadcast && m.WParam.ToInt32() == pbtApmPowerStatusChange)
+            RefreshPowerStatus();
+        base.WndProc(ref m);
+    }
+
+    internal void RefreshPowerStatus()
+    {
+        try
+        {
+            var snapshot = _powerStatusProvider();
+            _powerIndicator.SetSnapshot(snapshot);
+            _lastPowerStatusError = snapshot.Error;
+        }
+        catch (Exception ex)
+        {
+            _powerIndicator.SetSnapshot(PowerSupplySnapshot.Unavailable(ex.Message));
+            if (!string.Equals(_lastPowerStatusError, ex.Message, StringComparison.Ordinal))
+                Log("Falha ao consultar alimentação e bateria: " + ex.Message);
+            _lastPowerStatusError = ex.Message;
+        }
+        _powerIndicator.SetKeepAwakeActive(_request.IsEnabled || _presentationRequest?.IsEnabled == true);
     }
 
     internal void RefreshStatus()
@@ -296,9 +398,10 @@ internal sealed class MainForm : Form
             _windows.EndUpdate();
             var foreground = all.FirstOrDefault(w => w.IsForeground);
             var idle = SessionState.GetIdleTime();
-            _session.Text = $"Desktop: {SessionState.GetDesktopState()} | Última entrada: {(idle.HasValue ? $"{idle.Value.TotalSeconds:F0} s atrás" : "indisponível")} | Janelas visíveis: {matches.Count}/{all.Count}" + (foreground is null ? "" : $" | Ativa: {foreground.ProcessName}");
+            _session.Text = $"Desktop: {SessionState.GetDesktopState()} | Janelas visíveis: {matches.Count}/{all.Count}{Environment.NewLine}Última entrada: {(idle.HasValue ? $"{idle.Value.TotalSeconds:F0} s atrás" : "indisponível")}" + (foreground is null ? "" : $" | Janela ativa: {foreground.ProcessName}");
         }
         catch (Exception ex) { _session.Text = "Estado da sessão indisponível: " + ex.Message; }
+        UpdateDashboard();
     }
 
     private string BuildReport()
