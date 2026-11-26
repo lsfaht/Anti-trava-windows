@@ -19,6 +19,8 @@ public sealed class PresentationModeRequest(IPresentationPowerApi api) : IDispos
     private bool _disposed;
 
     public bool IsEnabled => _systemRequired || _displayRequired;
+    public bool IsSystemRequested => _systemRequired;
+    public bool IsDisplayRequested => _displayRequired;
 
     public void Enable()
     {
