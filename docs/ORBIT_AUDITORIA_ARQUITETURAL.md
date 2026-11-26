@@ -1,7 +1,7 @@
 # Orbit — auditoria arquitetural inicial
 
-Data da auditoria: 2026-10-28  
-Branch observada: `codex/windows-keep-awake`  
+Data da auditoria: 2026-10-28
+Branch observada: `codex/windows-keep-awake`
 Commit observado: `dc807353c6b2c3422946f9a484c4a2b2cc2a4b3c`
 
 ## Escopo e evidências
