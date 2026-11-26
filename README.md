@@ -1,6 +1,32 @@
-# Windows Keep Awake
+# Orbit — Windows Keep Awake
 
-## Interface atual
+## Orbit em homologação
+
+Foi adicionado um host WinUI 3 paralelo para iniciar a evolução visual do produto. O executável Orbit usa .NET 8 e Windows App SDK 1.8, com publicação Windows x64 self-contained. A interface inclui Início, Keep Awake, Manutenção, Diagnóstico de janelas e Histórico; reutiliza `KeepAwake.Core`, as solicitações de energia existentes, o analisador somente leitura da TEMP e o formato de histórico atual. O filtro de janelas não persiste títulos, e a análise TEMP não lê conteúdo nem modifica arquivos.
+
+Para compilar, use o SDK .NET 8 e execute `dotnet build src/Orbit.App/Orbit.App.csproj --configuration Release`. A primeira restauração baixa dependências do Windows App SDK do NuGet. O Windows App SDK é distribuído junto com o aplicativo. Para publicar também o runtime .NET: `dotnet publish src/Orbit.App/Orbit.App.csproj --configuration Release --self-contained true --output artifacts/orbit/0.1.1/win-x64`. Inicie `Orbit.exe` nessa pasta. Se outra versão Orbit estiver aberta, encerre-a por **Sair** antes de trocar a versão: o mutex encaminha novas aberturas à instância já existente.
+
+Esta entrega é um host de homologação, não substitui ainda a versão WinForms de produção. O host Orbit tem NotifyIcon, menu, restauração por duplo clique, ocultação ao fechar/minimizar e mutex/sinal para evitar instâncias Orbit duplicadas. A identidade do ícone ainda reutiliza temporariamente o recurso legado. A preferência de inicialização com o Windows e o instalador ainda não foram migrados; o app legado continua preservando esses fluxos durante a transição. Os hosts WinForms e Orbit usam mutexes distintos: para testar solicitações de energia, não deixe os dois ativos ao mesmo tempo. O host Orbit inicia inativo e não ativa pedido automaticamente. O teste de build não valida visualmente a janela; a captura real desta execução continua pendente por timeout do mecanismo de captura Windows.
+
+Os testes isolados da camada Orbit rodam com `dotnet run --project tests/Orbit.Tests --configuration Release`; eles usam APIs de energia falsas e não comprovam comportamento real do Windows. A suíte legada continua em `dotnet run --project tests/KeepAwake.Tests --configuration Release`.
+
+Para identidade Orbit, a migração de bandeja usa integração Win32 ou uma biblioteca suportada; o Windows App SDK não oferece um controle próprio de bandeja ([orientação oficial da Microsoft](https://learn.microsoft.com/en-us/windows/apps/get-started/line-of-business/migrate-winforms-patterns)).
+
+### Diagnóstico de ciclo de vida — Orbit 0.1.1
+
+Os indicadores mostram **Solicitação aceita pela API** ou **Solicitações aceitas pela API**. Isso registra o retorno das chamadas, sem comprovar que o Windows impediu bloqueio. Após suspensão/retomada, pedidos anteriores são marcados como não revalidados; não há reativação automática. Eventos de bloqueio, desbloqueio, conexão/desconexão e energia registram o estado interno naquele momento. A causa do bloqueio não é inferida desses eventos.
+
+Em **Diagnóstico → Exportar diagnóstico**, o relatório é salvo em `%LOCALAPPDATA%\Orbit\reports`. Inclui versão, PID, identificador de execução, horários com fuso, eventos e consultas somente leitura às configurações numéricas de inatividade/protetor de tela. Valores ausentes e acessos negados são identificados. O relatório não executa `powercfg /requests`, `gpresult` nem consulta o log Security: informa que essas verificações estão pendentes, sem inventar o resultado de permissão.
+
+O arquivo `%LOCALAPPDATA%\Orbit\events.jsonl` guarda os novos eventos e gira ao atingir aproximadamente 1 MiB, preservando um arquivo `.previous`. Há um sinal de vida a cada 30 segundos enquanto a thread da interface responde. `%LOCALAPPDATA%\Orbit\run-state.json` permite detectar uma execução anterior sem encerramento normal confirmado. Isso não comprova crash nem distingue término forçado, desligamento, travamento ou falha de disco. Exceções registram tipo, HRESULT, código Win32 quando disponível e nomes de métodos, sem mensagens arbitrárias nem caminhos de documentos. Os últimos 256 eventos também ficam em memória para exportação quando a gravação falha. O log legado `diagnostics.log` é preservado e não é incorporado ao relatório novo.
+
+Minimizar e fechar pelo **X** ocultam a janela e mantêm pedidos; **Abrir janela** e o duplo clique usam a mesma restauração. **Sair** libera os recursos e registra o resultado da limpeza. O Windows ainda pode encerrar processos por desligamento, falha ou ação externa.
+
+Teste do host real, com APIs de energia falsas: `artifacts\orbit\0.1.1\win-x64\Orbit.exe --diagnostic-smoke`. Ele usa mutex e arquivos separados em `smoke-results` ao lado do executável, abre/manipula somente sua própria janela e fecha ao concluir. Não força bloqueio, suspensão nem desligamento de monitor. Seu `result.json` deve conter todos os 13 cenários e zero falhas; a ausência do relatório ou execução incompleta é falha/limitação, não aprovação. A visibilidade física do ícone na bandeja e o duplo clique físico ainda dependem de observação manual.
+
+Resultados e limitações: [validação de diagnóstico](docs/ORBIT_DIAGNOSTICO_VALIDACAO.md).
+
+## Interface WinForms legada
 
 A janela principal usa tema grafite com destaque verde e seis seções. O menu lateral mostra os nomes completos em janelas largas e muda para ícones com tooltips abaixo de 1120 px. Os cards do dashboard se reorganizam em até três colunas. No rodapé lateral, alimentação/bateria e Keep Awake aparecem como estados separados; o primeiro vem de `GetSystemPowerStatus`, atualiza ao receber `WM_POWERBROADCAST` e tem polling de 15 segundos como fallback. Valores desconhecidos não são inventados e o modo compacto mantém os detalhes em tooltips. As páginas extensas rolam verticalmente e a janela pode ser reduzida até 800×480 unidades lógicas. O aplicativo declara suporte a DPI por monitor (`PerMonitorV2`) e ajusta a navegação e o catálogo quando o espaço muda.
 
@@ -18,7 +44,7 @@ O aplicativo impede uma segunda instância para o mesmo usuário e sessão do Wi
 
 ## Ativação, duração e modo de apresentação
 
-Ao abrir, **Manter também a tela ligada** já está marcado e o modo de apresentação é ativado automaticamente. O estado só é mostrado como ativo depois da confirmação das APIs do Windows; falhas são exibidas e registradas. O botão **Ativar modo de apresentação** usa as APIs Win32 documentadas `PowerCreateRequest`, `PowerSetRequest` e `PowerClearRequest` com `PowerRequestSystemRequired` e `PowerRequestDisplayRequired`. A documentação da Microsoft informa que o pedido de tela mantém a tela ligada e impede o início automático do protetor de tela e o bloqueio automático por inatividade enquanto a solicitação estiver ativa. Ele mantém a sessão disponível enquanto ativo; não desbloqueia uma sessão já bloqueada nem impede bloqueio manual.
+No host WinForms legado, ao abrir, **Manter também a tela ligada** já está marcado e o modo de apresentação é ativado automaticamente. No Orbit, a ativação é manual. O botão **Ativar modo de apresentação** usa as APIs Win32 documentadas `PowerCreateRequest`, `PowerSetRequest` e `PowerClearRequest` com `PowerRequestSystemRequired` e `PowerRequestDisplayRequired`. A documentação da Microsoft descreve a permanência da tela ligada e a supressão do protetor de tela e bloqueio automático por inatividade enquanto o pedido de tela estiver efetivo. O retorno de sucesso da API não comprova esse efeito nesta máquina nem identifica a política efetiva. Não desbloqueia uma sessão já bloqueada nem impede bloqueio manual.
 
 Escolha **30 minutos**, **1 hora**, **2 horas** ou **Indefinidamente** em **Duração**. A duração começa quando uma solicitação é ativada ou quando a duração é alterada enquanto há uma solicitação ativa. Ao expirar, o aplicativo tenta liberar os dois modos e atualiza janela e bandeja. **Indefinidamente** não agenda expiração. Desativar manualmente impede a reativação automática durante aquela sessão do aplicativo.
 

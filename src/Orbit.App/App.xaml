@@ -1,0 +1,42 @@
+<Application
+    x:Class="Orbit.App.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <Color x:Key="OrbitBackground">#101619</Color>
+                    <Color x:Key="OrbitSurface">#192226</Color>
+                    <Color x:Key="OrbitSurfaceAlt">#202C31</Color>
+                    <Color x:Key="OrbitAccent">#42D6B3</Color>
+                    <Color x:Key="OrbitText">#F1F6F5</Color>
+                    <Color x:Key="OrbitMuted">#A9B7B5</Color>
+                    <SolidColorBrush x:Key="OrbitBackgroundBrush" Color="{StaticResource OrbitBackground}" />
+                    <SolidColorBrush x:Key="OrbitSurfaceBrush" Color="{StaticResource OrbitSurface}" />
+                    <SolidColorBrush x:Key="OrbitSurfaceAltBrush" Color="{StaticResource OrbitSurfaceAlt}" />
+                    <SolidColorBrush x:Key="OrbitAccentBrush" Color="{StaticResource OrbitAccent}" />
+                    <SolidColorBrush x:Key="OrbitTextBrush" Color="{StaticResource OrbitText}" />
+                    <SolidColorBrush x:Key="OrbitMutedBrush" Color="{StaticResource OrbitMuted}" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <Color x:Key="OrbitBackground">#F2F6F5</Color>
+                    <Color x:Key="OrbitSurface">#FFFFFF</Color>
+                    <Color x:Key="OrbitSurfaceAlt">#E4EFEC</Color>
+                    <Color x:Key="OrbitAccent">#087D67</Color>
+                    <Color x:Key="OrbitText">#172321</Color>
+                    <Color x:Key="OrbitMuted">#52635F</Color>
+                    <SolidColorBrush x:Key="OrbitBackgroundBrush" Color="{StaticResource OrbitBackground}" />
+                    <SolidColorBrush x:Key="OrbitSurfaceBrush" Color="{StaticResource OrbitSurface}" />
+                    <SolidColorBrush x:Key="OrbitSurfaceAltBrush" Color="{StaticResource OrbitSurfaceAlt}" />
+                    <SolidColorBrush x:Key="OrbitAccentBrush" Color="{StaticResource OrbitAccent}" />
+                    <SolidColorBrush x:Key="OrbitTextBrush" Color="{StaticResource OrbitText}" />
+                    <SolidColorBrush x:Key="OrbitMutedBrush" Color="{StaticResource OrbitMuted}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
